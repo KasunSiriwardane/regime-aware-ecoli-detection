@@ -1,11 +1,26 @@
-import pandas as pd
-import numpy as np
-import dataretrieval.nwis as nwis
-import requests
+"""Build the raw daily backbone and pull labeled samples.
+
+The outputs from this script mirror the logic in the research notebook:
+
+* Flow is cubic feet per second (cfs).
+* Rain is inches/day.
+* Turbidity is in FNU; we capture both mean/median and max where available.
+* Conductivity is microsiemens (uS/cm).
+
+Values are kept timezone-naive and aligned to midnight to avoid accidental
+timezone drift. Any negative physical measurements are treated as sensor
+errors and set to ``NaN`` in the downstream cleaning stage.
+"""
+
 import io
 import os
 import re
 from pathlib import Path
+
+import dataretrieval.nwis as nwis
+import numpy as np
+import pandas as pd
+import requests
 
 # --- PATH SETUP ---
 ROOT = Path(__file__).resolve().parents[1]
