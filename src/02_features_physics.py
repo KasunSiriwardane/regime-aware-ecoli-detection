@@ -1,7 +1,22 @@
-import pandas as pd
-import numpy as np
+"""Causal feature engineering for hydrology and water quality signals.
+
+Derived features and units (aligned with the notebook):
+* Flow in cfs; rises are day-over-day increases only (no negative drops).
+* Rain in inches; ``Rain_3Day_Sum``/``Rain_7Day_Sum`` use zero-filled totals
+  but include accompanying missing-count windows to expose uncertainty.
+* Turbidity in FNU; ``Log_Turbidity`` uses a composite of mean then max and
+  applies ``log10(x + 1)``.
+* Conductivity in uS/cm; ``Cond_Ratio`` compares daily value to a 30-day mean
+  (not median).
+
+Negative physical readings are treated as sensor errors and coerced to NaN.
+"""
+
 import os
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 
 # --- PATH SETUP ---
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,10 +30,15 @@ df_samples_raw = pd.read_csv(DATA / '01_ecoli_samples_v6.csv')
 df_daily['Date'] = pd.to_datetime(df_daily['Date'])
 df_samples_raw['Date'] = pd.to_datetime(df_samples_raw['Date'])
 
+required_cols = ['Flow_cfs', 'Turbidity_FNU', 'Turbidity_FNU_Max', 'Rain_inches', 'Cond_uS']
+missing = [c for c in required_cols if c not in df_daily.columns]
+if missing:
+    raise ValueError(f"Missing required proxy columns: {missing}")
+
 print("--- PHASE 1.5: PROCESSING & CLEANING ---")
 
 # 1. SANITY CLEANING
-cols_to_clean = ['Flow_cfs', 'Turbidity_FNU', 'Turbidity_FNU_Max', 'Rain_inches']
+cols_to_clean = ['Flow_cfs', 'Turbidity_FNU', 'Turbidity_FNU_Max', 'Rain_inches', 'Cond_uS']
 for col in cols_to_clean:
     if col in df_daily.columns:
         neg_mask = df_daily[col] < 0
@@ -64,7 +84,7 @@ for r in is_rainy:
 df_daily['Days_Since_Rain'] = days_since
 
 # 4. CONDUCTIVITY & SEASONALITY
-df_daily['Cond_Roll30'] = df_daily['Cond_uS'].rolling(window=30, min_periods=15).median()
+df_daily['Cond_Roll30'] = df_daily['Cond_uS'].rolling(window=30, min_periods=15).mean()
 df_daily['Cond_Ratio'] = df_daily['Cond_uS'] / df_daily['Cond_Roll30']
 
 day_of_year = df_daily['Date'].dt.dayofyear
@@ -88,7 +108,9 @@ rename_map = {
     'Ecoli_CFU_max': 'Ecoli_CFU_Max',
     'Ecoli_CFU_median': 'Ecoli_CFU_Median',
     'Log_Ecoli_max': 'Log_Ecoli',
-    'Target_Unsafe_max': 'Target_Unsafe'
+    'Target_Unsafe_max': 'Target_Unsafe',
+    'Units_first': 'Units',
+    'Time_first': 'Sample_Time',
 }
 rename_final = {k:v for k,v in rename_map.items() if k in df_samples_daily.columns}
 df_samples_daily = df_samples_daily.rename(columns=rename_final).reset_index()
